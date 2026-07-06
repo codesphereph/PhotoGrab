@@ -141,6 +141,32 @@
     background:transparent;color:#8a80a3;
     padding:9px 10px;
   }
+
+  /* ---------- manual-install instructions sheet ---------- */
+  #installSheet{
+    position:fixed;inset:0;z-index:30;
+    display:none;
+    align-items:flex-end;
+    background:rgba(0,0,0,.55);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  #installSheet.show{display:flex}
+  #installSheet .card{
+    width:100%;
+    background:#1c1430;
+    border-top:1px solid rgba(122,92,214,.35);
+    border-radius:18px 18px 0 0;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+    color:#fff;
+  }
+  #installSheet h3{margin:0 0 12px;font-size:16px}
+  #installSheet ol{margin:0 0 16px;padding-left:20px;color:#cfc7e0;font-size:14px;line-height:1.6}
+  #installSheet button{
+    width:100%;border:0;border-radius:20px;
+    background:var(--purple2);color:#fff;
+    padding:11px;font-weight:700;font-size:14px;
+    font-family:inherit;cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -168,10 +194,18 @@
     <img src="icon.png" alt="PhotoGrab">
     <div class="txt">
       <div class="t1">Install PhotoGrab</div>
-      <div class="t2">Add to your home screen for quick access</div>
+      <div class="t2" id="bannerSubtext">Add to your home screen for quick access</div>
     </div>
     <button id="dismissBtn">Not now</button>
     <button id="installBtn">Install</button>
+  </div>
+
+  <div id="installSheet">
+    <div class="card">
+      <h3 id="sheetTitle">Install PhotoGrab</h3>
+      <ol id="sheetSteps"></ol>
+      <button id="sheetCloseBtn">Got it</button>
+    </div>
   </div>
 
 <script>
@@ -203,9 +237,13 @@
 
   // ---------------- Install banner ----------------
   var deferredPrompt = null;
-  var banner = document.getElementById('installBanner');
-  var installBtn = document.getElementById('installBtn');
-  var dismissBtn = document.getElementById('dismissBtn');
+  var banner      = document.getElementById('installBanner');
+  var installBtn  = document.getElementById('installBtn');
+  var dismissBtn  = document.getElementById('dismissBtn');
+  var bannerSub   = document.getElementById('bannerSubtext');
+  var sheet       = document.getElementById('installSheet');
+  var sheetSteps  = document.getElementById('sheetSteps');
+  var sheetClose  = document.getElementById('sheetCloseBtn');
   var DISMISS_KEY = 'pg_install_dismissed';
 
   function isStandalone(){
@@ -217,20 +255,60 @@
     try{
       var t = localStorage.getItem(DISMISS_KEY);
       if(!t) return false;
-      // hide banner for 7 days after dismissal
-      return (Date.now() - parseInt(t,10)) < (7*24*60*60*1000);
+      // hide banner for 3 days after dismissal
+      return (Date.now() - parseInt(t,10)) < (3*24*60*60*1000);
     }catch(e){ return false; }
   }
+
+  function markDismissed(){
+    try{ localStorage.setItem(DISMISS_KEY, Date.now().toString()); }catch(e){}
+  }
+
+  var ua = window.navigator.userAgent || '';
+  var isIos      = /iphone|ipad|ipod/i.test(ua);
+  var isAndroid  = /android/i.test(ua);
+  var isSafari   = /^((?!chrome|android).)*safari/i.test(ua);
+  var isChrome   = /chrome|crios/i.test(ua) && !/edg|opr/i.test(ua);
 
   function showBanner(){
     if(isStandalone() || wasDismissedRecently()) return;
     banner.classList.add('show');
   }
+  function hideBanner(){ banner.classList.remove('show'); }
 
-  function hideBanner(){
-    banner.classList.remove('show');
+  function showSheet(){
+    var steps = [];
+    if(isIos && isSafari){
+      steps = [
+        'Tap the <strong>Share</strong> icon (square with an arrow) in the toolbar.',
+        'Scroll down and tap <strong>Add to Home Screen</strong>.',
+        'Tap <strong>Add</strong> in the top right corner.'
+      ];
+    } else if(isAndroid){
+      steps = [
+        'Tap the <strong>&#8942;</strong> menu icon (top right).',
+        'Tap <strong>Add to Home screen</strong> or <strong>Install app</strong>.',
+        'Confirm by tapping <strong>Install</strong>.'
+      ];
+    } else if(isChrome){
+      steps = [
+        'Click the <strong>install icon</strong> (⊕) in the address bar, or open the browser menu.',
+        'Select <strong>Install PhotoGrab...</strong>',
+        'Confirm by clicking <strong>Install</strong>.'
+      ];
+    } else {
+      steps = [
+        'Open your browser menu.',
+        'Look for <strong>Add to Home screen</strong> or <strong>Install</strong>.',
+        'Confirm to finish installing PhotoGrab.'
+      ];
+    }
+    sheetSteps.innerHTML = steps.map(function(s){ return '<li>' + s + '</li>'; }).join('');
+    sheet.classList.add('show');
   }
+  function hideSheet(){ sheet.classList.remove('show'); }
 
+  // Native prompt (Chrome/Edge/Android) — capture it whenever it fires
   window.addEventListener('beforeinstallprompt', function(e){
     e.preventDefault();
     deferredPrompt = e;
@@ -239,32 +317,41 @@
 
   installBtn.addEventListener('click', function(){
     hideBanner();
-    if(!deferredPrompt) return;
-    deferredPrompt.prompt();
-    deferredPrompt.userChoice.finally(function(){
-      deferredPrompt = null;
-    });
+    if(deferredPrompt){
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.finally(function(){ deferredPrompt = null; });
+    } else {
+      // No native prompt available (iOS, or Chrome hasn't fired the event yet) —
+      // show manual step-by-step instructions instead.
+      showSheet();
+    }
   });
 
   dismissBtn.addEventListener('click', function(){
     hideBanner();
-    try{ localStorage.setItem(DISMISS_KEY, Date.now().toString()); }catch(e){}
+    markDismissed();
+  });
+
+  sheetClose.addEventListener('click', function(){
+    hideSheet();
+    markDismissed();
   });
 
   window.addEventListener('appinstalled', function(){
     hideBanner();
+    hideSheet();
     deferredPrompt = null;
   });
 
-  // iOS Safari has no beforeinstallprompt event — show a manual hint instead.
-  function isIos(){
-    return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  // Always show the banner (after a short delay) if the app isn't already
+  // installed and wasn't recently dismissed — regardless of whether the
+  // native beforeinstallprompt event has fired. This keeps the banner
+  // working on iOS and on browsers/timings where Chrome withholds the
+  // native prompt.
+  if (isIos) {
+    bannerSub.textContent = 'Tap the Share icon, then "Add to Home Screen"';
   }
-  if (isIos() && !isStandalone() && !wasDismissedRecently()) {
-    document.querySelector('#installBanner .t2').textContent =
-      'Tap the Share icon, then "Add to Home Screen"';
-    setTimeout(showBanner, 1200);
-  }
+  setTimeout(showBanner, 1500);
 </script>
 </body>
 </html>
